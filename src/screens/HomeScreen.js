@@ -1,114 +1,165 @@
-import React, { useState, useRef } from 'react';
-import { View, Button, Image, Text, StyleSheet, Alert } from 'react-native';
-import { RNCamera } from 'react-native-camera';
-import { useNavigation } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker'; //  NEW
+import React, { useState } from 'react';
+import { View, Button, Image, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+
+const HOST = 'http://172.16.74.62:5000'; // Use your actual IP
 
 const HomeScreen = () => {
-  const navigation = useNavigation();
-  const cameraRef = useRef();
+  const [imageUri, setImageUri] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [prediction, setPrediction] = useState(null);
 
-  const [leftUri, setLeftUri] = useState(null);
-  const [rightUri, setRightUri] = useState(null);
-  const [readings, setReadings] = useState([]);
+  const pickImage = async () => {
+    console.log('Starting image picker');
+    try {
+      // Remove allowsEditing and aspect ratio to disable cropping
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 1,
+      });
 
-  const takePicture = async (side) => {
-    if (!cameraRef.current) return;
-    const data = await cameraRef.current.takePictureAsync();
-    if (side === 'left') setLeftUri(data.uri);
-    else setRightUri(data.uri);
-  };
+      console.log('Image picker result:', result);
 
-  //  NEW: Pick image from gallery instead of camera
-  const pickImage = async (side) => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      if (side === 'left') setLeftUri(uri);
-      else setRightUri(uri);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedImage = result.assets[0];
+        console.log('Image selected:', selectedImage.uri);
+        setImageUri(selectedImage.uri);
+        setPrediction(null);
+      } else {
+        console.log('Image selection cancelled');
+      }
+    } catch (error) {
+      console.error('Image picker error:', error);
+      Alert.alert('Error', 'Could not select image');
     }
   };
 
-  const getReading = async () => {
-    if (!leftUri || !rightUri) {
-      Alert.alert('Please capture both left and right images first.');
+  const uploadImage = async () => {
+    if (!imageUri) {
+      Alert.alert('Error', 'Please select an image first');
       return;
     }
 
-    const form = new FormData();
-    form.append('left', { uri: leftUri, name: 'left.jpg', type: 'image/jpeg' });
-    form.append('right', { uri: rightUri, name: 'right.jpg', type: 'image/jpeg' });
+    console.log('Starting image upload with URI:', imageUri);
+    setLoading(true);
 
     try {
-      const res = await fetch('http://127.0.0.1:5000/predict', {
-        method: 'POST',
-        body: form,
-      });
-      const json = await res.json();
-      if (json.error) {
-        Alert.alert('Error', json.error);
-        return;
+      // Read the file content
+      const fileInfo = await FileSystem.getInfoAsync(imageUri);
+      if (!fileInfo.exists) {
+        throw new Error('File does not exist');
       }
-      setReadings((prev) => [...prev, json]);
-      setLeftUri(null);
-      setRightUri(null);
-    } catch (err) {
-      Alert.alert('Network error', err.message);
-    }
-  };
 
-  const onProceed = () => {
-    if (readings.length < 3) {
-      Alert.alert('Need 3 readings', `Currently you have ${readings.length}.`);
-      return;
+      const filename = imageUri.split('/').pop();
+      const fileType = filename.split('.').pop().toLowerCase();
+
+      const formData = new FormData();
+      formData.append('image', {
+        uri: imageUri,
+        name: filename,
+        type: `image/${fileType}`,
+      });
+
+      console.log('Sending request to:', `${HOST}/detect-block`);
+      const response = await fetch(`${HOST}/detect-block`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      console.log('Response status:', response.status);
+      const result = await response.json();
+      console.log('Response data:', result);
+
+      if (result.status === 'success') {
+        setPrediction({
+          block: result.block,
+          confidence: result.confidence,
+        });
+      } else {
+        Alert.alert('Error', result.message || 'Prediction failed');
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      Alert.alert('Error', error.message || 'Image upload failed');
+    } finally {
+      setLoading(false);
     }
-    navigation.navigate('Map', { readings });
   };
 
   return (
     <View style={styles.container}>
-      <RNCamera
-        ref={cameraRef}
-        style={styles.camera}
-        type={RNCamera.Constants.Type.back}
-      />
+      {imageUri && (
+        <>
+          <Image source={{ uri: imageUri }} style={styles.image} />
+          <Text style={styles.imageInfo}>{imageUri}</Text>
+        </>
+      )}
 
-      <View style={styles.buttons}>
-        <Button title="Capture Left View" onPress={() => takePicture('left')} />
-        <Button title="Capture Right View" onPress={() => takePicture('right')} />
+      <View style={styles.buttonContainer}>
+        <Button title="Select Image" onPress={pickImage} />
       </View>
 
-      {/*  NEW Upload buttons */}
-      <View style={styles.buttons}>
-        <Button title="Upload Left Image" onPress={() => pickImage('left')} />
-        <Button title="Upload Right Image" onPress={() => pickImage('right')} />
-      </View>
+      {loading ? (
+        <ActivityIndicator size="large" color="#0000ff" />
+      ) : (
+        <View style={styles.buttonContainer}>
+          <Button 
+            title="Upload and Detect" 
+            onPress={uploadImage} 
+            disabled={!imageUri || loading} 
+          />
+        </View>
+      )}
 
-      <View style={styles.preview}>
-        {leftUri && <Image source={{ uri: leftUri }} style={styles.thumb} />}
-        {rightUri && <Image source={{ uri: rightUri }} style={styles.thumb} />}
-      </View>
-
-      <Button title="Get Reading" onPress={getReading} />
-      <Text style={styles.count}>Readings: {readings.length}/3</Text>
-      <Button title="Proceed to Map" onPress={onProceed} disabled={readings.length < 3} />
+      {prediction && (
+        <View style={styles.resultContainer}>
+          <Text style={styles.resultText}>Block: {prediction.block}</Text>
+          <Text style={styles.resultText}>
+            Confidence: {(prediction.confidence * 100).toFixed(2)}%
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  camera: { flex: 4 },
-  buttons: { flexDirection: 'row', justifyContent: 'space-around', padding: 10 },
-  preview: { flexDirection: 'row', justifyContent: 'center', padding: 10 },
-  thumb: { width: 80, height: 80, margin: 5, borderRadius: 5 },
-  count: { textAlign: 'center', margin: 10, fontSize: 16 },
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  image: {
+    width: 300,
+    height: 300,
+    marginBottom: 10,
+    resizeMode: 'contain',
+  },
+  imageInfo: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 20,
+  },
+  buttonContainer: {
+    marginVertical: 10,
+    width: '80%',
+  },
+  resultContainer: {
+    marginTop: 20,
+    padding: 15,
+    backgroundColor: '#e8f4f8',
+    borderRadius: 5,
+  },
+  resultText: {
+    fontSize: 16,
+    marginVertical: 5,
+  },
 });
 
 export default HomeScreen;
-
-
