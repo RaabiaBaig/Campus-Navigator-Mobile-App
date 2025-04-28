@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { View, Button, Image, Text, StyleSheet, Alert, ActivityIndicator, ScrollView, Modal, TouchableOpacity } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
+import { useNavigation } from '@react-navigation/native';
 
 const HOST = 'http://172.16.74.62:5000'; // Use your actual IP
 const MAX_RUNS = 3; // Number of times to run the process
 
 const HomeScreen = () => {
+  const navigation = useNavigation();
   const [runs, setRuns] = useState([]);
   const [currentRun, setCurrentRun] = useState({
     imageUris: [],
@@ -60,6 +62,70 @@ const HomeScreen = () => {
     } catch (error) {
       console.error('Image picker error:', error);
       Alert.alert('Error', 'Could not select images');
+    }
+  };
+
+  // Function to capture images from camera
+  const captureImages = async () => {
+    console.log('Starting camera capture');
+    try {
+      // Request camera permissions first if needed
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Please allow access to your camera to take photos');
+        return;
+      }
+
+      // We'll capture two images one after another
+      const capturedImages = [];
+      
+      for (let i = 0; i < 2; i++) {
+        Alert.alert(
+          `Capture Image ${i + 1}`,
+          `Please position your camera for image ${i + 1} of 2 and press OK to take the photo`,
+          [
+            {
+              text: 'Cancel',
+              onPress: () => {
+                console.log('Image capture cancelled');
+                return;
+              },
+              style: 'cancel',
+            },
+            {
+              text: 'OK',
+              onPress: async () => {
+                const result = await ImagePicker.launchCameraAsync({
+                  mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                  allowsEditing: false,
+                  aspect: [4, 3],
+                  quality: 1,
+                });
+
+                if (!result.canceled && result.assets && result.assets.length > 0) {
+                  capturedImages.push(result.assets[0].uri);
+                  console.log(`Image ${i + 1} captured:`, result.assets[0].uri);
+
+                  // If we've captured both images, update state
+                  if (capturedImages.length === 2) {
+                    setCurrentRun(prev => ({
+                      ...prev,
+                      imageUris: capturedImages,
+                      prediction: null,
+                      distanceResult: null,
+                      step: 2
+                    }));
+                  }
+                }
+              },
+            },
+          ],
+          { cancelable: false }
+        );
+      }
+    } catch (error) {
+      console.error('Camera capture error:', error);
+      Alert.alert('Error', 'Could not capture images');
     }
   };
 
@@ -222,8 +288,8 @@ const HomeScreen = () => {
 
       if (result.status === 'success') {
         setPositionResult({
-          x: result.position[0].toFixed(2),
-          y: result.position[1].toFixed(2),
+          x: result.position[0],
+          y: result.position[1],
           error: result.error_estimate.toFixed(2),
           landmarks: result.used_landmarks
         });
@@ -244,6 +310,20 @@ const HomeScreen = () => {
       setLoading(false);
       setShowTrilaterationButton(false);
     }
+  };
+
+  const navigateToMap = () => {
+    if (!positionResult) {
+      Alert.alert('Error', 'No position data available');
+      return;
+    }
+    
+    navigation.navigate('Map', { 
+      position: {
+        x: parseFloat(positionResult.x),
+        y: parseFloat(positionResult.y)
+      }
+    });
   };
 
   const resetProcess = () => {
@@ -272,8 +352,13 @@ const HomeScreen = () => {
           {/* Step 1: Select Images */}
           <View style={styles.stepContainer}>
             <Text style={styles.stepTitle}>Step 1: Select Two Images</Text>
-            <View style={styles.buttonContainer}>
-              <Button title="Select Two Images" onPress={pickImages} />
+            <View style={styles.buttonRow}>
+              <View style={styles.buttonWrapper}>
+                <Button title="Pick from Gallery" onPress={pickImages} />
+              </View>
+              <View style={styles.buttonWrapper}>
+                <Button title="Capture with Camera" onPress={captureImages} />
+              </View>
             </View>
             
             {currentRun.imageUris.length > 0 && (
@@ -378,13 +463,21 @@ const HomeScreen = () => {
         <View style={styles.stepContainer}>
           <Text style={styles.stepTitle}>Your Position</Text>
           <View style={styles.resultContainer}>
-            <Text style={styles.resultText}>X: {positionResult.x}m (East-West)</Text>
-            <Text style={styles.resultText}>Y: {positionResult.y}m (North-South)</Text>
+            <Text style={styles.resultText}>X: {positionResult.x.toFixed(2)}m (East-West)</Text>
+            <Text style={styles.resultText}>Y: {positionResult.y.toFixed(2)}m (North-South)</Text>
             <Text style={styles.resultText}>Estimated error: ±{positionResult.error}m</Text>
             <Text style={styles.resultText}>Used {positionResult.landmarks} landmarks</Text>
             <Text style={styles.noteText}>
               Note: Coordinates are relative to Block A (0,0)
             </Text>
+          </View>
+          {/* View on Map Button */}
+          <View style={styles.buttonContainer}>
+            <Button 
+              title="View on Map" 
+              onPress={navigateToMap} 
+              color="#2196F3"
+            />
           </View>
         </View>
       )}
@@ -462,6 +555,15 @@ const styles = StyleSheet.create({
   buttonContainer: {
     marginVertical: 10,
     width: '100%',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 10,
+  },
+  buttonWrapper: {
+    width: '48%', // Slightly less than half to account for spacing
   },
   imagePreviewContainer: {
     flexDirection: 'row',
