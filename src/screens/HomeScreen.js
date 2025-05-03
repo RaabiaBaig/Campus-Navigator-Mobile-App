@@ -290,14 +290,14 @@ const HomeScreen = () => {
         setPositionResult({
           x: result.position[0],
           y: result.position[1],
-          error: result.error_estimate.toFixed(2),
+          
           landmarks: result.used_landmarks
         });
         
         Alert.alert(
           'Position Calculated',
           `Your estimated position is:\nX: ${result.position[0].toFixed(2)}m\nY: ${result.position[1].toFixed(2)}m\n` +
-          `Error estimate: ±${result.error_estimate.toFixed(2)}m\n` +
+          
           `Used landmarks: ${result.used_landmarks}`
         );
       } else {
@@ -465,7 +465,7 @@ const HomeScreen = () => {
           <View style={styles.resultContainer}>
             <Text style={styles.resultText}>X: {positionResult.x.toFixed(2)}m (East-West)</Text>
             <Text style={styles.resultText}>Y: {positionResult.y.toFixed(2)}m (North-South)</Text>
-            <Text style={styles.resultText}>Estimated error: ±{positionResult.error}m</Text>
+            
             <Text style={styles.resultText}>Used {positionResult.landmarks} landmarks</Text>
             <Text style={styles.noteText}>
               Note: Coordinates are relative to Block A (0,0)
